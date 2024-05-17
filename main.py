@@ -6,7 +6,7 @@ WordleHelper - Помощник для игры в "5 слов"
 
 Описание:
   Скрипт помогает отгадывать слова в игре "5 слов", используя заданные известные и неизвестные буквы,
-  а также буквы, которые точно отсутствуют в слове.
+  а также буквы, которые точно отсутствуют в слове. Фильтрует только существительные (по суффиксам).
 
 Использование:
   python3 main.py [options]
@@ -18,7 +18,7 @@ WordleHelper - Помощник для игры в "5 слов"
   --excluded <letters>   Буквы, отсутствующие в слове.
 
 Автор: Maksim Borzov
-Версия: 1.0.0
+Версия: 1.0.1
 """
 
 import re
@@ -28,9 +28,22 @@ class WordleHelper:
     def __init__(self, dictionary_path='dictionary.txt'):
         # Инициализация объекта с прочтением слов длиной в 5 букв из файла
         with open(dictionary_path, 'r', encoding='utf-8') as file:
-            self.words = [word.strip() for word in file if len(word.strip()) == 5]
+            self.words = [word.strip().lower() for word in file if len(word.strip()) == 5 and self._is_likely_noun(word.strip().lower())]
+
+    def _is_likely_noun(self, word):
+        # Проверка наличия окончаний, характерных для существительных
+        common_noun_endings = (
+            'а', 'я', 'о', 'е', 'ё', 'мя', 'ь', 'ий', 'ы', 'и',
+            'ей', 'ия', 'ий', 'ий', 'ей', 'й', 'е', 'ё', 'я'
+        )
+        return word.endswith(common_noun_endings)
     
     def find_words(self, known='', unknown='', excluded=''):
+        # Приведение всех входных параметров к нижнему регистру
+        known = known.lower()
+        unknown = unknown.lower()
+        excluded = excluded.lower()
+
         # Генерация шаблона по известным позициям букв
         pattern = self._generate_pattern(known)
         # Фильтрация слов по шаблону
