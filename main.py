@@ -24,7 +24,7 @@ WordleHelper - Помощник для игры в "5 слов"
   --interactive         Интерактивный режим с пошаговыми подсказками
 
 Автор: Maksim Borzov
-Версия: 2.0.0
+Версия: 2.0.1
 """
 
 import re
@@ -86,8 +86,8 @@ class WordleHelper:
         unknown = unknown.lower()
         excluded = excluded.lower()
 
-        # Проверка конфликтов между known и unknown
-        self._check_conflicts(known, unknown)
+        # Проверка конфликтов между known, unknown и excluded
+        self._check_conflicts(known, unknown, excluded)
 
         # Статистика фильтрации
         stats = {'original': len(self.words)}
@@ -135,19 +135,34 @@ class WordleHelper:
         if excluded and not re.match(r'^[а-яё]+$', excluded.lower()):
             raise ValidationError("Параметр excluded должен содержать только русские буквы")
 
-    def _check_conflicts(self, known, unknown):
-        """Проверка конфликтов между known и unknown буквами"""
-        if not unknown:
-            return
-            
+    def _check_conflicts(self, known, unknown, excluded):
+        """Проверка конфликтов между known, unknown и excluded буквами"""
         known_letters = set(known.replace('_', ''))
-        unknown_letters = set(unknown)
+        unknown_letters = set(unknown) if unknown else set()
+        excluded_letters = set(excluded) if excluded else set()
         
-        conflicts = known_letters & unknown_letters
-        if conflicts:
+        # Конфликт 1: known vs unknown
+        conflicts_unknown = known_letters & unknown_letters
+        if conflicts_unknown:
             raise ValidationError(
-                f"Буквы {', '.join(sorted(conflicts))} указаны и в known, и в unknown. "
+                f"Буквы {', '.join(sorted(conflicts_unknown))} указаны и в known, и в unknown. "
                 "Это противоречие - если позиция буквы известна, она не может быть 'неизвестной'"
+            )
+        
+        # Конфликт 2: known vs excluded  
+        conflicts_excluded = known_letters & excluded_letters
+        if conflicts_excluded:
+            raise ValidationError(
+                f"Буквы {', '.join(sorted(conflicts_excluded))} указаны и в known, и в excluded. "
+                "Это противоречие - если буква точно есть в слове, она не может быть исключена"
+            )
+            
+        # Конфликт 3: unknown vs excluded
+        conflicts_both = unknown_letters & excluded_letters  
+        if conflicts_both:
+            raise ValidationError(
+                f"Буквы {', '.join(sorted(conflicts_both))} указаны и в unknown, и в excluded. "
+                "Это противоречие - буква не может одновременно присутствовать и отсутствовать"
             )
 
     def _generate_pattern(self, known):
@@ -347,6 +362,7 @@ class WordleHelper:
                 new_unknown = list(unknown)
                 new_excluded = list(excluded)
                 
+                # Анализируем каждую букву
                 for i, (letter, status) in enumerate(zip(word, result)):
                     if status == '+':
                         new_known[i] = letter
@@ -354,16 +370,19 @@ class WordleHelper:
                         while letter in new_unknown:
                             new_unknown.remove(letter)
                     elif status == '?':
-                        if letter not in new_unknown and letter not in new_known:
+                        # Буква есть в слове, но не на этой позиции
+                        if letter not in new_unknown and letter not in ''.join(new_known):
                             new_unknown.append(letter)
-                        # Исключаем эту позицию для данной буквы
-                        # (это сложнее реализовать, пока пропускаем)
                     elif status == '-':
-                        if letter not in new_excluded:
-                            new_excluded.append(letter)
-                        # Убираем из unknown если была там
-                        while letter in new_unknown:
-                            new_unknown.remove(letter)
+                        # Буква отсутствует в слове, НО только если она не зафиксирована в known
+                        if letter not in ''.join(new_known):
+                            if letter not in new_excluded:
+                                new_excluded.append(letter)
+                            # Убираем из unknown если была там
+                            while letter in new_unknown:
+                                new_unknown.remove(letter)
+                        # Если буква есть в known, но помечена как "-", это означает что 
+                        # в слове нет ДОПОЛНИТЕЛЬНЫХ экземпляров этой буквы
                 
                 known = ''.join(new_known)
                 unknown = ''.join(new_unknown)
