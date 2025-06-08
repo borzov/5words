@@ -24,7 +24,7 @@ WordleHelper - Помощник для игры в "5 слов"
   --interactive         Интерактивный режим с пошаговыми подсказками
 
 Автор: Maksim Borzov
-Версия: 2.0.2
+Версия: 2.0.0
 """
 
 import re
@@ -306,6 +306,7 @@ class WordleHelper:
         unknown = ''
         excluded = ''
         attempt = 1
+        last_suggested_word = None
         
         while True:
             try:
@@ -330,6 +331,7 @@ class WordleHelper:
                 if len(words) > 1:
                     excluded_set = set(excluded)
                     suggested = self.suggest_next_word(words, excluded_set, known, unknown)
+                    last_suggested_word = suggested
                     print(f"💡 Рекомендую попробовать: '{suggested.upper()}'")
                     print(f"   (это слово поможет максимально сузить поиск)")
                 elif len(words) == 1:
@@ -339,7 +341,11 @@ class WordleHelper:
                 print()
                 
                 # Ввод пользователя
-                user_input = input("Введите слово и результат (например: 'адрес ?а+д-р-е?с') или 'quit' для выхода: ").strip()
+                prompt = "Введите слово и результат (например: 'адрес ?а+д-р-е?с')"
+                if last_suggested_word:
+                    prompt += f" или только результат для '{last_suggested_word.upper()}'"
+                prompt += " или 'quit' для выхода: "
+                user_input = input(prompt).strip()
                 
                 if user_input.lower() in ['quit', 'выход', 'q']:
                     print("👋 До свидания!")
@@ -350,12 +356,20 @@ class WordleHelper:
                 
                 # Парсинг ввода - может быть как "слово +с-т-е-н?а" так и "слово +++--"
                 parts = user_input.split(maxsplit=1)
-                if len(parts) != 2:
+                if len(parts) == 1 and last_suggested_word:
+                    # Пользователь ввел только результат для предложенного слова
+                    word = last_suggested_word
+                    result_input = parts[0]
+                    print(f"🎯 Применяю результат к предложенному слову: '{word.upper()}'")
+                    print(f"   Если вы имели в виду другое слово, введите: слово результат")
+                elif len(parts) == 2:
+                    word, result_input = parts
+                else:
                     print("❌ Неверный формат. Используйте: 'слово результат'")
                     print("   Пример: адрес ?а+д-р-е?с")
+                    if last_suggested_word:
+                        print(f"   Или только результат: ?а+д-р-е?с (для слова '{last_suggested_word.upper()}')")
                     continue
-                
-                word, result_input = parts
                 word = word.lower()
                 
                 if len(word) != 5:
@@ -382,11 +396,15 @@ class WordleHelper:
                 new_unknown = list(unknown)
                 new_excluded = list(excluded)
                 
-                # Анализируем каждую букву
+                # Сначала обрабатываем все '+' чтобы зафиксировать known буквы
                 for i, (letter, status) in enumerate(zip(word, result)):
                     if status == '+':
                         new_known[i] = letter
-                        # Убираем из unknown если была там
+
+                # Теперь обрабатываем '?' и '-' с учетом уже зафиксированных букв
+                for i, (letter, status) in enumerate(zip(word, result)):
+                    if status == '+':
+                        # Убираем из unknown если была там (буква уже зафиксирована)
                         while letter in new_unknown:
                             new_unknown.remove(letter)
                     elif status == '?':
@@ -394,15 +412,18 @@ class WordleHelper:
                         if letter not in new_unknown and letter not in ''.join(new_known):
                             new_unknown.append(letter)
                     elif status == '-':
-                        # Буква отсутствует в слове, НО только если она не зафиксирована в known
-                        if letter not in ''.join(new_known):
+                        # Буква помечена как отсутствующая на этой позиции
+                        # Проверяем есть ли она уже в known позициях
+                        known_string = ''.join(new_known)
+                        if letter not in known_string:
+                            # Буквы вообще нет в слове
                             if letter not in new_excluded:
                                 new_excluded.append(letter)
                             # Убираем из unknown если была там
                             while letter in new_unknown:
                                 new_unknown.remove(letter)
-                        # Если буква есть в known, но помечена как "-", это означает что 
-                        # в слове нет ДОПОЛНИТЕЛЬНЫХ экземпляров этой буквы
+                        # Если буква уже есть в known, то "-" означает что дополнительных 
+                        # экземпляров этой буквы нет - пока не обрабатываем этот случай
                 
                 known = ''.join(new_known)
                 unknown = ''.join(new_unknown)
