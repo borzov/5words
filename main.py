@@ -24,7 +24,7 @@ WordleHelper - Помощник для игры в "5 слов"
   --interactive         Интерактивный режим с пошаговыми подсказками
 
 Автор: Maksim Borzov
-Версия: 2.0.0
+Версия: 2.0.1
 """
 
 import re
@@ -141,15 +141,7 @@ class WordleHelper:
         unknown_letters = set(unknown) if unknown else set()
         excluded_letters = set(excluded) if excluded else set()
         
-        # Конфликт 1: known vs unknown
-        conflicts_unknown = known_letters & unknown_letters
-        if conflicts_unknown:
-            raise ValidationError(
-                f"Буквы {', '.join(sorted(conflicts_unknown))} указаны и в known, и в unknown. "
-                "Это противоречие - если позиция буквы известна, она не может быть 'неизвестной'"
-            )
-        
-        # Конфликт 2: known vs excluded  
+        # Конфликт 1: known vs excluded (более строгий)
         conflicts_excluded = known_letters & excluded_letters
         if conflicts_excluded:
             raise ValidationError(
@@ -157,13 +149,17 @@ class WordleHelper:
                 "Это противоречие - если буква точно есть в слове, она не может быть исключена"
             )
             
-        # Конфликт 3: unknown vs excluded
+        # Конфликт 2: unknown vs excluded  
         conflicts_both = unknown_letters & excluded_letters  
         if conflicts_both:
             raise ValidationError(
                 f"Буквы {', '.join(sorted(conflicts_both))} указаны и в unknown, и в excluded. "
                 "Это противоречие - буква не может одновременно присутствовать и отсутствовать"
             )
+        
+        # Примечание: конфликт known vs unknown теперь НЕ проверяется
+        # Это позволяет обрабатывать повторяющиеся буквы:
+        # например, 'а' на известной позиции + дополнительная 'а' в unknown позиции
 
     def _generate_pattern(self, known):
         """Замена нижних подчеркиваний на точки для создания регулярного выражения"""
@@ -301,6 +297,10 @@ class WordleHelper:
         print("Формат результата: +буква (правильно), ?буква (есть, но не здесь), -буква (нет в слове)")
         print("Пример: +м?о-т+р-а означает: м на месте, о есть но не здесь, т нет, р на месте, а нет")
         print()
+        print("📝 Команды:")
+        print("  reset/сброс - сбросить состояние и начать заново")
+        print("  quit/выход  - завершить работу")
+        print()
 
         known = '_____'
         unknown = ''
@@ -311,7 +311,7 @@ class WordleHelper:
         while True:
             try:
                 # Поиск текущих вариантов
-                words, stats = self.find_words(known, unknown, excluded, limit=20)
+                words, stats = self.find_words(known, unknown, excluded, limit=50)
                 
                 print(f"📊 Попытка {attempt}")
                 print(f"Текущее состояние: known='{known}', unknown='{unknown}', excluded='{excluded}'")
@@ -320,12 +320,12 @@ class WordleHelper:
                     print("❌ Подходящих слов не найдено. Возможно, есть ошибка в данных.")
                     break
                 
-                print(f"✅ Найдено {len(words)} слов (показаны первые 10):")
-                for i, word in enumerate(words[:10], 1):
+                print(f"✅ Найдено {len(words)} слов (показаны первые 25):")
+                for i, word in enumerate(words[:25], 1):
                     print(f"  {i:2}. {word}")
                 
-                if len(words) > 10:
-                    print(f"     ... и ещё {len(words) - 10} слов")
+                if len(words) > 25:
+                    print(f"     ... и ещё {len(words) - 25} слов")
                 
                 # Предложение следующего слова
                 if len(words) > 1:
@@ -344,12 +344,22 @@ class WordleHelper:
                 prompt = "Введите слово и результат (например: 'адрес ?а+д-р-е?с')"
                 if last_suggested_word:
                     prompt += f" или только результат для '{last_suggested_word.upper()}'"
-                prompt += " или 'quit' для выхода: "
+                prompt += " или 'reset' для сброса или 'quit' для выхода: "
                 user_input = input(prompt).strip()
                 
                 if user_input.lower() in ['quit', 'выход', 'q']:
                     print("👋 До свидания!")
                     break
+                
+                if user_input.lower() in ['reset', 'сброс', 'new', 'новое']:
+                    print("🔄 Сброс состояния. Начинаем заново!")
+                    known = '_____'
+                    unknown = ''
+                    excluded = ''
+                    attempt = 1
+                    last_suggested_word = None
+                    print()
+                    continue
                 
                 if not user_input:
                     continue
@@ -376,19 +386,27 @@ class WordleHelper:
                     print(f"❌ Слово должно содержать ровно 5 букв, получено: {len(word)}")
                     continue
                 
-                # Парсинг результата - извлекаем только символы статуса
-                result = ""
+                # Парсинг результата - извлекаем пары статус+буква
+                parsed_results = []
                 i = 0
-                while i < len(result_input) and len(result) < 5:
+                while i < len(result_input) and len(parsed_results) < 5:
                     char = result_input[i]
                     if char in "+-?":
-                        result += char
-                    i += 1
+                        # Найден символ статуса, ищем следующую букву
+                        if i + 1 < len(result_input) and result_input[i + 1].isalpha():
+                            letter = result_input[i + 1].lower()
+                            parsed_results.append((char, letter))
+                            i += 2
+                        else:
+                            print(f"❌ После символа '{char}' должна идти буква")
+                            break
+                    else:
+                        i += 1
                 
-                if len(result) != 5:
-                    print(f"❌ Результат должен содержать ровно 5 символов статуса (+, -, ?), получено: {len(result)}")
-                    print("   Используйте: + (правильно), ? (есть но не здесь), - (нет в слове)")
-                    print(f"   Найдено статусов: '{result}'")
+                if len(parsed_results) != 5:
+                    print(f"❌ Результат должен содержать ровно 5 пар 'символ+буква', получено: {len(parsed_results)}")
+                    print("   Используйте: +буква (правильно), ?буква (есть но не здесь), -буква (нет в слове)")
+                    print(f"   Распознанные пары: {parsed_results}")
                     continue
                 
                 # Обновление критериев на основе результата
@@ -397,33 +415,42 @@ class WordleHelper:
                 new_excluded = list(excluded)
                 
                 # Сначала обрабатываем все '+' чтобы зафиксировать known буквы
-                for i, (letter, status) in enumerate(zip(word, result)):
+                for i, (status, letter) in enumerate(parsed_results):
                     if status == '+':
                         new_known[i] = letter
 
                 # Теперь обрабатываем '?' и '-' с учетом уже зафиксированных букв
-                for i, (letter, status) in enumerate(zip(word, result)):
+                for i, (status, letter) in enumerate(parsed_results):
+                    known_string = ''.join(new_known)
+                    
                     if status == '+':
                         # Убираем из unknown если была там (буква уже зафиксирована)
                         while letter in new_unknown:
                             new_unknown.remove(letter)
                     elif status == '?':
                         # Буква есть в слове, но не на этой позиции
-                        if letter not in new_unknown and letter not in ''.join(new_known):
+                        # Проверяем сколько раз буква уже встречается в known + unknown
+                        known_count = known_string.count(letter)
+                        unknown_count = new_unknown.count(letter)
+                        total_confirmed = known_count + unknown_count
+                        
+                        # Добавляем в unknown только если нужно больше экземпляров этой буквы
+                        if total_confirmed == 0:
                             new_unknown.append(letter)
+                        elif known_count > 0:
+                            # Буква уже есть в known, значит есть повторяющиеся буквы
+                            # Добавляем дополнительный экземпляр в unknown
+                            new_unknown.append(letter)
+                            
                     elif status == '-':
                         # Буква помечена как отсутствующая на этой позиции
                         # Проверяем есть ли она уже в known позициях
-                        known_string = ''.join(new_known)
-                        if letter not in known_string:
+                        if letter not in known_string and letter not in new_unknown:
                             # Буквы вообще нет в слове
                             if letter not in new_excluded:
                                 new_excluded.append(letter)
-                            # Убираем из unknown если была там
-                            while letter in new_unknown:
-                                new_unknown.remove(letter)
-                        # Если буква уже есть в known, то "-" означает что дополнительных 
-                        # экземпляров этой буквы нет - пока не обрабатываем этот случай
+                        # Если буква есть в known/unknown, то "-" означает что больше 
+                        # экземпляров этой буквы нет - не добавляем в excluded
                 
                 known = ''.join(new_known)
                 unknown = ''.join(new_unknown)
