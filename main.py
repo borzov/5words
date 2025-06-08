@@ -24,7 +24,7 @@ WordleHelper - Помощник для игры в "5 слов"
   --interactive         Интерактивный режим с пошаговыми подсказками
 
 Автор: Maksim Borzov
-Версия: 2.0.1
+Версия: 2.0.2
 """
 
 import re
@@ -222,7 +222,7 @@ class WordleHelper:
                                  for pos, pos_counts in position_counts.items()}
         }
 
-    def suggest_next_word(self, current_words, excluded_letters=set()):
+    def suggest_next_word(self, current_words, excluded_letters=set(), known='_____', unknown=''):
         """Предложить оптимальное следующее слово для максимального исключения вариантов"""
         if not current_words:
             # Если слов не осталось, предлагаем стартовое слово
@@ -230,21 +230,37 @@ class WordleHelper:
                                 if word in self.words and not any(letter in excluded_letters for letter in word)]
             return available_starters[0] if available_starters else random.choice(self.words)
         
-        if len(current_words) <= 3:
-            # Если слов мало, просто берем первое
+        if len(current_words) <= 2:
+            # Если слов очень мало, просто берем первое из найденных
             return current_words[0]
         
-        # Ищем слово, которое максимально разделит оставшиеся варианты
+        if len(current_words) <= 5:
+            # Если слов мало, предлагаем один из найденных вариантов
+            return current_words[len(current_words)//2]  # Берем средний по рейтингу
+        
+        # Для большого количества вариантов ищем оптимальное слово для разделения
         best_word = None
         best_score = -1
         
-        # Анализируем все возможные слова из словаря
-        candidate_words = [word for word in self.words 
-                          if not any(letter in excluded_letters for letter in word)]
+        # Сначала пробуем слова из найденных вариантов
+        candidate_words = current_words[:10]  # Топ-10 найденных слов
         
-        # Берем случайную выборку для ускорения
-        if len(candidate_words) > 100:
-            candidate_words = random.sample(candidate_words, 100)
+        # Добавляем некоторые слова из словаря, которые не противоречат ограничениям
+        additional_candidates = []
+        for word in self.words:
+            if not any(letter in excluded_letters for letter in word):
+                # Проверяем что слово не противоречит known позициям
+                valid = True
+                for i, letter in enumerate(known):
+                    if letter != '_' and (i >= len(word) or word[i] != letter):
+                        valid = False
+                        break
+                if valid:
+                    additional_candidates.append(word)
+                    if len(additional_candidates) >= 20:  # Ограничиваем для производительности
+                        break
+        
+        candidate_words.extend(additional_candidates)
         
         for candidate in candidate_words:
             # Подсчитываем, сколько групп получится при использовании этого слова
@@ -254,7 +270,11 @@ class WordleHelper:
                 groups[pattern] += 1
             
             # Лучший кандидат - тот, который создает наиболее равномерное разбиение
-            score = len(groups) - max(groups.values()) / len(current_words)
+            # И приоритет отдаем словам из найденных вариантов
+            diversity_score = len(groups) - max(groups.values()) / len(current_words)
+            is_from_results = 1 if candidate in current_words else 0
+            score = diversity_score + is_from_results * 0.5
+            
             if score > best_score:
                 best_score = score
                 best_word = candidate
@@ -309,7 +329,7 @@ class WordleHelper:
                 # Предложение следующего слова
                 if len(words) > 1:
                     excluded_set = set(excluded)
-                    suggested = self.suggest_next_word(words, excluded_set)
+                    suggested = self.suggest_next_word(words, excluded_set, known, unknown)
                     print(f"💡 Рекомендую попробовать: '{suggested.upper()}'")
                     print(f"   (это слово поможет максимально сузить поиск)")
                 elif len(words) == 1:
@@ -472,7 +492,7 @@ def main():
         # Предложение следующего слова
         if args.suggest:
             excluded_set = set(args.excluded.lower())
-            suggested = helper.suggest_next_word(results, excluded_set)
+            suggested = helper.suggest_next_word(results, excluded_set, args.known.lower(), args.unknown.lower())
             print(f"\n💡 Рекомендуемое слово для проверки: '{suggested.upper()}'")
     
     except WordleHelperError as e:
